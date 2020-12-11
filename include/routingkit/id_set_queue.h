@@ -52,7 +52,7 @@ public:
 	explicit IDSetMinQueue(unsigned n):
 		min_id(invalid_id),
 		offset(smallest_two_power_no_smaller_than(n)),
-		data(n+offset, false){}
+		data(n+offset+1, false){}
 
 	unsigned id_count() const {
 		return data.size()-offset;

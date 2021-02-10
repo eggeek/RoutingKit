@@ -1,3 +1,54 @@
+# Running distributed experiment
+
+## Preparing Data
+* download [data](https://drive.google.com/file/d/1WeCyZvXyarwWsf1SoyiTv7jS5blrPEfx/view?usp=sharing)
+* unzip, and put it at the same level of `RoutingKit/src`.
+* create test file, e.g. `test.in`
+```
+{
+  "threads": 10
+}
+cchfifo.log 10
+74943 38765
+89656 38757
+8782 38765
+8774 38757
+82913 38784
+89653 38784
+165018 38765
+107165 102242
+104984 38765
+135957 38757
+```
+
+Finally, the structure would like:
+
+```sh
+.
+├── data/
+ ...
+├── src/
+└── test.in
+```
+
+## Build
+
+* `rm -rf build Makefile`: to clean 
+* `./generate_make_file`: to generate makefile
+  * toggle the comment on line 9 and 10 to switch between `debug` and `release`
+* `make`: to build and compile
+
+## Run
+
+* `./bin/fifo-query --input data/bundles/melb/melb.first_out`: start the server
+  * this assumes data are well-organized in the bundle, the full command would be
+  ```bash
+  ./bin/fifo-query --input <first_out> <head> <weight> <cch_order>
+  ```
+* `cat test.in > /tmp/cchfifo`: send data to the server and run
+* `cat cchfifo.log`: get results
+
+
 # RoutingKit
 
 [![Build Status](https://travis-ci.org/RoutingKit/RoutingKit.svg?branch=master)](https://travis-ci.org/RoutingKit/RoutingKit)

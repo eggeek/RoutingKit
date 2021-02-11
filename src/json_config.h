@@ -7,6 +7,7 @@
 #define VERBOSE false
 #endif
 
+#include <omp.h>
 #include "constants.h"
 #include "json.h"
 
@@ -28,11 +29,8 @@ typedef std::tuple<unsigned int, // Nodes expanded
 
 typedef struct config
 {
-    double hscale = 1.0;                // Modifier for heuristic's value
-    double fscale = 0.0;                // Quality tolerance
     double time = DBL_MAX;
     uint32_t itrs = warthog::INF32;
-    uint32_t k_moves = warthog::INF32;
     unsigned char threads = 0;
     bool verbose = VERBOSE;
     bool debug = false;
@@ -43,8 +41,8 @@ void
 to_json(nlohmann::json& j, const config& c)
 {
     j = {
-        {"hscale", c.hscale}, {"fscale", c.fscale}, {"time", c.time},
-        {"itrs", c.itrs}, {"k_moves", c.k_moves}, {"threads", c.threads},
+        {"time", c.time},
+        {"itrs", c.itrs}, {"threads", c.threads},
         {"verbose", c.verbose}, {"debug", c.debug},
         {"thread_alloc", c.thread_alloc}
     };
@@ -53,11 +51,8 @@ to_json(nlohmann::json& j, const config& c)
 void
 from_json(const nlohmann::json& j, config &c)
 {
-    j.at("hscale").get_to(c.hscale);
-    j.at("fscale").get_to(c.fscale);
     j.at("time").get_to(c.time);
     j.at("itrs").get_to(c.itrs);
-    j.at("k_moves").get_to(c.k_moves);
     j.at("threads").get_to(c.threads);
     j.at("verbose").get_to(c.verbose);
     j.at("debug").get_to(c.debug);
@@ -91,17 +86,12 @@ operator>>(std::istream& is, config &c)
  *
  * TODO Should this be part of cpd search directly?
  */
-void
+inline void
 sanitise_conf(config& conf)
 {
-    conf.fscale = std::max(0.0, conf.fscale);
-    conf.hscale = std::max(1.0, conf.hscale);
 
     if (conf.itrs == 0)
     { conf.itrs = warthog::INF32; }
-
-    if (conf.k_moves == 0)
-    { conf.k_moves = warthog::INF32; }
 
     if (conf.time == 0)
     { conf.time = DBL_MAX; }

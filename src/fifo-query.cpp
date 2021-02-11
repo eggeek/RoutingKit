@@ -23,10 +23,15 @@
 #include "json.h"
 using namespace RoutingKit;
 using namespace std;
+// get the index of an edge <u, v>
+map<pair<unsigned, unsigned>, unsigned> idx;
 vector<unsigned> first_out, tail, head, weight, order;
 vector<CustomizableContractionHierarchyQuery> algos;
 string first_out_file, head_file, weight_file, order_file;
 string fifo = "/tmp/cchfifo";
+CustomizableContractionHierarchy cch;
+CustomizableContractionHierarchyMetric metric;
+CustomizableContractionHierarchyPartialCustomization partial_update;
 warthog::util::cfg cfg;
 
 void
@@ -44,8 +49,23 @@ struct Query {
 };
 
 struct Perturb {
-  int u, v, w;
+  unsigned u, v, w;
 };
+
+void run_customization(config& conf, vector<Perturb>& diffs) {
+  trace(conf.verbose, "Preparing to perturb", diffs.size(), "edges.");
+  warthog::timer t;
+  t.start();
+  partial_update.reset();
+  for (auto& diff: diffs) {
+    auto eid = idx[{diff.u, diff.v}];
+    weight[eid] = diff.w;
+    partial_update.update_arc(eid);
+  }
+  partial_update.customize(metric);
+  t.stop();
+  trace(conf.verbose, "Processed", diffs.size(), "edges in ", t.elapsed_time_nano(), "us.");
+}
 
 void run_experiment(config& conf,
     vector<Query>& queries, string& fifo_out) {
@@ -116,7 +136,7 @@ void run_experiment(config& conf,
         tquery.stop();
         tot += tquery.elapsed_time_nano();
         ext += tquery.elapsed_time_nano();
-        debug("[", thread_id, "]: query:", i, "from", q.s, "to", q.t, "dist:", d);
+        debug(conf.verbose, "[", thread_id, "]: query:", i, "from", q.s, "to", q.t, "dist:", d);
       }
       t_thread.stop();
 
@@ -125,11 +145,33 @@ void run_experiment(config& conf,
                 "trips in", t_thread.elapsed_time_nano(), "us.");
     }
     t.stop();
-    user(conf.verbose, "Processed", n_results, "in", t.elapsed_time_nano(), "us");
+    user(conf.verbose, "Processed", n_results, "in", t.elapsed_time_nano(), "us.");
 
   out << tot << "," << ext << "," << (long long)t.elapsed_time_nano() << endl;
   if (fifo_out != "-") { of.close(); }
 }
+
+void load_queries(fstream& fd, config& conf, vector<Query>& queries) {
+  size_t s = 0;
+  fd >> s;
+  debug(conf.verbose, "Preparing to read", s, "items.");
+  queries.resize(s);
+  for (size_t i=0; i<s; i++) 
+    fd >> queries[i].s >> queries[i].t;
+  trace(conf.verbose, "Read", queries.size(), "queries.");
+}
+
+void load_diff(fstream& fd, config& conf, vector<Perturb>& diffs) {
+  size_t s = 0;
+  fd >> s;
+  debug(conf.verbose, "Preparing to read", s, "perturbations.");
+  diffs.resize(s);
+  for (size_t i=0; i<s; i++) {
+    fd >> diffs[i].u >> diffs[i].v >> diffs[i].w;
+  }
+  trace(conf.verbose, "Read", s, "perturbations.");
+}
+
 
 void run_cch() {
   warthog::timer t;
@@ -139,16 +181,16 @@ void run_cch() {
   vector<Query> queries;
   vector<Perturb> diffs;
 
-  CustomizableContractionHierarchy cch(order, tail, head, [](const std::string&){}, true);
-	CustomizableContractionHierarchyMetric partial_metric(cch, weight);
-  CustomizableContractionHierarchyPartialCustomization partial_update(cch);
+  cch = CustomizableContractionHierarchy(order, tail, head, [](const std::string&){}, true);
+	metric = CustomizableContractionHierarchyMetric(cch, weight);
+  partial_update = CustomizableContractionHierarchyPartialCustomization(cch);
 
   t.start();
-  partial_metric.customize();
+  metric.customize();
   t.stop();
 
   for (auto& algo: algos) {
-    algo = CustomizableContractionHierarchyQuery(partial_metric);
+    algo = CustomizableContractionHierarchyQuery(metric);
   }
 
   debug(true, "Customization:", t.elapsed_time_nano(), " us");
@@ -171,14 +213,13 @@ void run_cch() {
         debug(conf.verbose, e.what());
     }
     trace(conf.verbose, conf);
-    size_t s = 0;
-    fd >> fifo_out >> s;
-    debug(conf.verbose, "Preparing to read", s, "items.");
+    fd >> fifo_out;
     debug(conf.verbose, "Output to", fifo_out);
-    queries.resize(s);
-    for (size_t i=0; i<s; i++) 
-      fd >> queries[i].s >> queries[i].t;
-    trace(conf.verbose, "Read", queries.size(), "queries.");
+    load_diff(fd, conf, diffs);
+    if (diffs.size()) {
+      run_customization(conf, diffs);
+    }
+    load_queries(fd, conf, queries);
     if (queries.size()) {
       run_experiment(conf, queries, fifo_out);
     }
@@ -241,6 +282,7 @@ int main(int argc, char* argv[]) {
       perror("mkfifo");
       return EXIT_FAILURE;
   }
+
   debug(true, "Reading from", fifo);
 
   // Register signal handlers
@@ -253,5 +295,9 @@ int main(int argc, char* argv[]) {
   head = load_vector<unsigned>(head_file);
   weight = load_vector<unsigned>(weight_file);
   order = load_vector<unsigned>(order_file);
+  // init index
+  for (size_t i=0; i<tail.size(); i++) {
+    idx[{tail[i], head[i]}] = i;
+  }
   run_cch();
 }

@@ -3,12 +3,17 @@
 ## Preparing Data
 * download [data](https://drive.google.com/file/d/1WeCyZvXyarwWsf1SoyiTv7jS5blrPEfx/view?usp=sharing)
 * unzip, and put it at the same level of `RoutingKit/src`.
-* create test file, e.g. `test.in`
+* create test file, e.g. `test.in`:
+the following file tell the server to write results to `cchfifo.log`, read 1 edge perturbation (weight of edge `<123803, 46>` change to `1291863`),
+and read 10 queries.
 ```
 {
   "threads": 10
 }
-cchfifo.log 10
+cchfifo.log
+1
+123803 46 1291863
+10
 74943 38765
 89656 38757
 8782 38765

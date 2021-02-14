@@ -8,7 +8,12 @@ the following file tell the server to write results to `cchfifo.log`, read 1 edg
 and read 10 queries.
 ```
 {
-  "threads": 10
+  "debug":true,
+  "itrs":4294967295,
+  "thread_alloc":false,
+  "threads":10,
+  "time":1.7976931348623157e+308,
+  "verbose":true
 }
 cchfifo.log
 1

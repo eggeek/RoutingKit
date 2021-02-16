@@ -52,9 +52,10 @@ struct Perturb {
   unsigned u, v, w;
 };
 
-void run_customization(config& conf, vector<Perturb>& diffs) {
+double run_customization(config& conf, vector<Perturb>& diffs) {
   trace(conf.verbose, "Preparing to perturb", diffs.size(), "edges.");
   warthog::timer t;
+  double custnano = 0;
   t.start();
   partial_update.reset();
   for (auto& diff: diffs) {
@@ -64,16 +65,19 @@ void run_customization(config& conf, vector<Perturb>& diffs) {
   }
   partial_update.customize(metric);
   t.stop();
+  custnano = t.elapsed_time_nano();
   trace(conf.verbose, "Processed", diffs.size(), "edges in ", t.elapsed_time_nano(), "us.");
+  return custnano;
 }
 
 void run_experiment(config& conf,
-    vector<Query>& queries, string& fifo_out) {
+    vector<Query>& queries, string& fifo_out,
+    const double& custnano, const double& pertubnano, const double& t_read) {
 
   size_t n_results = queries.size();
   vector<unsigned> path;
   warthog::timer t, tquery;
-  long long tot = 0, ext = 0;
+  long long t_query = 0, t_ext = 0;
   streambuf* buf;
   ofstream of;
   if (fifo_out == "-")
@@ -100,7 +104,7 @@ void run_experiment(config& conf,
   t.start();
 
 #pragma omp parallel num_threads(threads)                               \
-    reduction(+ : tot, ext)
+    reduction(+ : t_query, t_ext)
     {
 
       // Parallel data
@@ -129,13 +133,13 @@ void run_experiment(config& conf,
         auto d = algo.get_distance();
         tquery.stop();
 
-        tot += tquery.elapsed_time_nano();
+        t_query += tquery.elapsed_time_nano();
 
         tquery.start();
         path = algo.get_node_path();
         tquery.stop();
-        tot += tquery.elapsed_time_nano();
-        ext += tquery.elapsed_time_nano();
+        t_query += tquery.elapsed_time_nano();
+        t_ext += tquery.elapsed_time_nano();
         debug(conf.verbose, "[", thread_id, "]: query:", i, "from", q.s, "to", q.t, "dist:", d);
       }
       t_thread.stop();
@@ -146,23 +150,41 @@ void run_experiment(config& conf,
     }
     t.stop();
     user(conf.verbose, "Processed", n_results, "in", t.elapsed_time_nano(), "us.");
-
-  out << tot << "," << ext << "," << (long long)t.elapsed_time_nano() << endl;
+  out << (long long)t_query << ","  // time cost on query
+      << (long long)t_ext << "," // time cost on path extraction
+      << (long long)t.elapsed_time_nano() << "," // time cost on entire function
+      << (long long)custnano << "," // time cost on customize
+      << (long long)pertubnano << "," // time cost on perturbation
+      << (long long)t_read // time cost on reading
+      << endl;
   if (fifo_out != "-") { of.close(); }
 }
 
-void load_queries(fstream& fd, config& conf, vector<Query>& queries) {
+void load_queries(string& qfile, config& conf, vector<Query>& queries) {
+  if (qfile == "-") {
+    debug(conf.verbose, "No query file, skip.");
+    return;
+  }
+  debug(conf.verbose, "Reading queries from", qfile);
   size_t s = 0;
+  ifstream fd(qfile);
   fd >> s;
   debug(conf.verbose, "Preparing to read", s, "items.");
   queries.resize(s);
   for (size_t i=0; i<s; i++) 
     fd >> queries[i].s >> queries[i].t;
   trace(conf.verbose, "Read", queries.size(), "queries.");
+  fd.close();
 }
 
-void load_diff(fstream& fd, config& conf, vector<Perturb>& diffs) {
+void load_diff(string& dfile, config& conf, vector<Perturb>& diffs) {
+  if (dfile == "-") {
+    debug(conf.verbose, "No diff file, skip.");
+    return;
+  }
+  debug(conf.verbose, "Reading diff from", dfile);
   size_t s = 0;
+  ifstream fd(dfile);
   fd >> s;
   debug(conf.verbose, "Preparing to read", s, "perturbations.");
   diffs.resize(s);
@@ -170,6 +192,7 @@ void load_diff(fstream& fd, config& conf, vector<Perturb>& diffs) {
     fd >> diffs[i].u >> diffs[i].v >> diffs[i].w;
   }
   trace(conf.verbose, "Read", s, "perturbations.");
+  fd.close();
 }
 
 
@@ -177,10 +200,11 @@ void run_cch() {
   warthog::timer t;
   fstream fd;
   config conf;
-  string fifo_out;
+  string fifo_out, qfile, dfile;
   vector<Query> queries;
   vector<Perturb> diffs;
-
+  double custnano = 0;
+  double pertubnano = 0;
   cch = CustomizableContractionHierarchy(order, tail, head, [](const std::string&){}, true);
 	metric = CustomizableContractionHierarchyMetric(cch, weight);
   partial_update = CustomizableContractionHierarchyPartialCustomization(cch);
@@ -188,6 +212,7 @@ void run_cch() {
   t.start();
   metric.customize();
   t.stop();
+  custnano = t.elapsed_time_nano();
 
   for (auto& algo: algos) {
     algo = CustomizableContractionHierarchyQuery(metric);
@@ -203,6 +228,7 @@ void run_cch() {
         debug(VERBOSE, "Got a writer");
     }
 
+    t.start();
     // Start by reading config
     try
     {
@@ -213,15 +239,16 @@ void run_cch() {
         debug(conf.verbose, e.what());
     }
     trace(conf.verbose, conf);
-    fd >> fifo_out;
+    fd >> qfile >> dfile >> fifo_out;
     debug(conf.verbose, "Output to", fifo_out);
-    load_diff(fd, conf, diffs);
+    load_queries(qfile, conf, queries);
+    load_diff(dfile, conf, diffs);
+    t.stop();
     if (diffs.size()) {
-      run_customization(conf, diffs);
+      pertubnano = run_customization(conf, diffs);
     }
-    load_queries(fd, conf, queries);
     if (queries.size()) {
-      run_experiment(conf, queries, fifo_out);
+      run_experiment(conf, queries, fifo_out, custnano, pertubnano, t.elapsed_time_nano());
     }
   }
 }

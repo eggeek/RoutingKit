@@ -327,4 +327,6 @@ int main(int argc, char* argv[]) {
     idx[{tail[i], head[i]}] = i;
   }
   run_cch();
+
+  signalHandler(EXIT_FAILURE);
 }

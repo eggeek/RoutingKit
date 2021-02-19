@@ -75,7 +75,7 @@ void run_experiment(config& conf,
     const double& custnano, const double& pertubnano, const double& t_read) {
 
   size_t n_results = queries.size();
-  vector<unsigned> path;
+  vector<vector<unsigned>> paths;
   warthog::timer t, tquery;
   long long t_query = 0, t_ext = 0;
   streambuf* buf;
@@ -101,6 +101,7 @@ void run_experiment(config& conf,
   user(conf.verbose, "Preparing to process", queries.size(), "queries using",
        (int)threads, "threads.");
 
+  paths.resize(algos.size());
   t.start();
 
 #pragma omp parallel num_threads(threads)                               \
@@ -125,6 +126,7 @@ void run_experiment(config& conf,
       }
 
       CustomizableContractionHierarchyQuery& algo = algos[thread_id];
+      auto& path = paths[thread_id];
       t_thread.start();
       for (size_t i=from; i<to; i++) {
         const Query& q = queries[i];
@@ -140,7 +142,6 @@ void run_experiment(config& conf,
         tquery.stop();
         t_query += tquery.elapsed_time_nano();
         t_ext += tquery.elapsed_time_nano();
-        debug(conf.verbose, "[", thread_id, "]: query:", i, "from", q.s, "to", q.t, "dist:", d);
       }
       t_thread.stop();
 
